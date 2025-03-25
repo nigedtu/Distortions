@@ -2,28 +2,7 @@ import os
 # Change to your local directory:
 os.chdir(r"C:\Users\nige\OneDrive - Danmarks Tekniske Universitet\Dokumenter\Postdoc\Projects\Detector paper\20241204 beamtimedata\process\fields_corrected\MLL_new_detector")
 
-import h5py
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy.signal import find_peaks
-from scipy.interpolate import interp1d
-from scipy.io import savemat
-import cv2
-from scipy.optimize import least_squares
-from skimage.measure import label, regionprops
-from skimage.transform import radon
-from skimage.feature import corner_harris, corner_peaks
-from preprocessing import *
-from processing import *
-from postprocessing import *
-from linepattern import *
-import loadersaver as losa
-from scipy.ndimage import center_of_mass, label
-import itertools 
-from datetime import datetime
-import time
-import timeit
-import winsound
+from distortion_functions import *
 time_start = timeit.default_timer()
 
 
@@ -59,78 +38,38 @@ fnames = ['grid_scan_2398_corrected.h5'] # Martins Bech Checkerboard patter, mea
 with h5py.File(fnames[0], 'r') as file:
     image_data = file['corrected/image']
     corrected_data_2 = image_data[:]
-    
-fig, axs = plt.subplots(1,2,figsize=(21, 6))
-im=axs[0].imshow(corrected_data_2,cmap='gray')
-axs[1].imshow(corrected_data_2[3120:3270,3120:3270], cmap='gray')
 
+
+fs=14    
+# Create the subplots
+fig, axs = plt.subplots(1, 2, figsize=(14, 6))
+
+# Plot the full corrected data
+im = axs[0].imshow(corrected_data_2, cmap='gray')
+axs[0].set_title("Original image",fontsize=fs)
+axs[0].set_xlabel("X-axis (pixels)",fontsize=fs)
+axs[0].set_ylabel("Y-axis (pixels)",fontsize=fs)
+
+# Plot a cropped section of the corrected data
+axs[1].imshow(corrected_data_2[3000:3400, 3000:3400], cmap='gray')
+axs[1].set_title("Zoom-in Section of Original Image",fontsize=fs)
+axs[1].set_xlabel("X-axis (pixels)",fontsize=fs)
+axs[1].set_ylabel("Y-axis (pixels)",fontsize=fs)
+
+# Adjust layout for better display
+plt.tight_layout()
+
+# Show the plot
+plt.show()
 
 
 #%%
 
-def compute_centroids_from_matrix2(centroid_matrix):
-    # Label connected components
-    num_labels, labels = cv2.connectedComponents(centroid_matrix.astype(np.uint8))
-
-    # Get all coordinates of non-zero pixels once
-    coords = np.argwhere(labels > 0)
-
-    # Use a dictionary to collect coordinates per label
-    from collections import defaultdict
-    label_coords = defaultdict(list)
-
-    for y, x in coords:
-        label = labels[y, x]
-        label_coords[label].append((y, x))
-
-    # Compute centroids
-    centroids = []
-    for label, points in label_coords.items():
-        points = np.array(points)
-        centroid_y = np.mean(points[:, 0])
-        centroid_x = np.mean(points[:, 1])
-        centroids.append((centroid_y, centroid_x))
-
-    return centroids
-
-def harris_corners_to_centroid_matrix2(image, square_size=26, corner_threshold_factor=0.022):
-    """
-    Detects corner intersections using Harris corner detection and returns a matrix with detected corners marked as 1.
-    
-    Parameters:
-    - image: The input image (should be grayscale).
-    - square_size: The size of each square in the checkerboard pattern (default 26).
-    - corner_threshold_factor: A factor to scale the corner detection threshold.
-    
-    Returns:
-    - output_matrix: A binary matrix with 1s marking detected corners.
-    """
-    start_time = time.time()
-    image_float = np.float32(image)
-    
-    # Adjust blockSize based on square size (larger blocks for larger squares)
-    block_size = int(square_size / 2)  # Set the blockSize as half of the square size.
-    
-    # Perform Harris corner detection
-    corners = cv2.cornerHarris(image_float, blockSize=block_size, ksize=3, k=0.04)
-    
-    # Dilate to enhance corner regions
-    corners_dilated = cv2.dilate(corners, None)
-    
-    # Apply threshold to detect strong corners
-    corner_thresh = corner_threshold_factor * corners_dilated.max()
-    
-    # Create output matrix with 1s marking detected corners
-    output_matrix = np.zeros_like(image, dtype=np.uint8)  # Initialize as 0s
-    output_matrix[corners_dilated > corner_thresh] = 1  # Mark detected corners as 1
-    
-    return output_matrix  # Returns binary matrix with detected corners
 
 
 # Some images are saved. Select where you want them to be saved: 
 output_base = "../"
 # Select data
-image_data = corrected_data_2[3787:9787,3921:9921] # (10640, 13856)  # cod: (6787,6921)
 image_data = corrected_data_2[0:-1,0:-1] # (10640, 13856)  # cod: (6787,6921)
 image_data = np.where(np.isnan(image_data), 0.4, image_data) # Remove empty pixels
 mat0 = image_data # Initiate to use Discorypy nameing        https://github.com/DiamondLightSource/discorpy/tree/master
@@ -143,29 +82,46 @@ new_centroid_matrix = np.zeros_like(centroid_matrix)
 for (cy, cx) in centroids:
     new_centroid_matrix[int(cy), int(cx)] = 1  # Mark the centroid in the new matrix
 
-# Visualization
-fig, axs = plt.subplots(1, 3, figsize=(21, 6))
+
+# Visualization with 2x2 subplots
+fig, axs = plt.subplots(2, 2, figsize=(16, 12))
+
 # Plot the original image
-axs[0].imshow(image_data, cmap='gray')
-axs[0].set_title("Original Image")
+axs[0, 0].imshow(image_data, cmap='gray')
+axs[0, 0].set_title("Original Image", fontsize=fs)
+axs[0, 0].set_xlabel("X-axis (pixels)", fontsize=fs)
+axs[0, 0].set_ylabel("Y-axis (pixels)", fontsize=fs)
 
 # Plot the new centroid matrix with single centroids
-axs[1].imshow(new_centroid_matrix, cmap='gray')
-axs[1].set_title("Single Centroids")
+axs[0, 1].imshow(new_centroid_matrix, cmap='gray')
+axs[0, 1].set_title("Single Centroids", fontsize=fs)
+axs[0, 1].set_xlabel("X-axis (pixels)", fontsize=fs)
+axs[0, 1].set_ylabel("Y-axis (pixels)", fontsize=fs)
 
 # Overlay the single centroids on the original image
-axs[2].imshow(image_data, cmap='gray')
+axs[1, 0].imshow(image_data, cmap='gray')
 # Overlay centroids in red
 centroids_y, centroids_x = zip(*centroids)
-axs[2].scatter(centroids_x, centroids_y, color='red', s=50, edgecolors='black', alpha=0.75)
-axs[2].set_title("Overlay of Single Centroids on Image")
+axs[1, 0].scatter(centroids_x, centroids_y, color='red', s=50, edgecolors='black', alpha=0.75)
+axs[1, 0].set_title("Overlay of Single Centroids on Original Image", fontsize=fs)
+axs[1, 0].set_xlabel("X-axis (pixels)", fontsize=fs)
+axs[1, 0].set_ylabel("Y-axis (pixels)", fontsize=fs)
+
+# Plot the zoomed-in area [3000:3400, 3000:3400] as the fourth subplot (axs[1, 1])
+zoomed_in_area = image_data[3000:3400, 3000:3400]  # Zoom into the specified area
+axs[1, 1].imshow(zoomed_in_area, cmap='gray')  # Display zoomed-in image
+# Overlay centroids in red (zoomed-in area)
+centroids_y_zoomed, centroids_x_zoomed = zip(*[(y - 3000, x - 3000) for y, x in centroids if 3000 <= y <= 3400 and 3000 <= x <= 3400])
+axs[1, 1].scatter(centroids_x_zoomed, centroids_y_zoomed, color='red', s=50, edgecolors='black', alpha=0.75)
+axs[1, 1].set_title("Zoomed-In Area [3000:3400, 3000:3400] with Centroids", fontsize=fs)
+axs[1, 1].set_xlabel("X-axis (pixels)", fontsize=fs)
+axs[1, 1].set_ylabel("Y-axis (pixels)", fontsize=fs)
+
+# Adjust layout for better display
 plt.tight_layout()
+
+# Show the plot
 plt.show()
-
-print('\a')
-print('\a')
-
-
 
 #%%
 mat1 = np.where(new_centroid_matrix == 0, np.nan, new_centroid_matrix)
@@ -208,7 +164,9 @@ fig1 = plt.figure(figsize=(10, 6))
 plt.imshow(image_data, cmap='gray')
 for line in list_hor_lines:
     plt.plot(line[:, 1], line[:, 0], '-o', markersize=4, color=next(colors_hor))  # Assign next color
-plt.title("Original Image with Grouped Horizontal Dots")
+plt.title("Original Image with Grouped Horizontal Dots", fontsize=fs)
+plt.xlabel("X-axis (pixels)", fontsize=fs)
+plt.ylabel("Y-axis (pixels)", fontsize=fs)
 plt.show()  # Show the first figure
 
 # Define a new color cycle for vertical lines
@@ -219,33 +177,29 @@ fig2 = plt.figure(figsize=(10, 6))
 plt.imshow(image_data, cmap='gray')
 for line in list_ver_lines:
     plt.plot(line[:, 1], line[:, 0], '-o', markersize=4, color=next(colors_ver))  # Assign next color
-plt.title("Original Image with Grouped Vertical Dots")
+plt.title("Original Image with Grouped Vertical Dots", fontsize=fs)
+plt.xlabel("X-axis (pixels)", fontsize=fs)
+plt.ylabel("Y-axis (pixels)", fontsize=fs)
 plt.show()  # Show the second figure
 
 
 
 
-lengths = [len(list_hor_lines[i]) for i in range(len(list_hor_lines))]
-
+lengths_hor = [len(list_hor_lines[i]) for i in range(len(list_hor_lines))]
+lengths_ver = [len(list_ver_lines[i]) for i in range(len(list_ver_lines))]
 # Plot the lengths
 plt.figure(figsize=(10, 6))
-plt.plot(lengths, marker='o',color='r')
-plt.title('Length of Arrays in list_hor_lines')
-plt.xlabel('Index i')
-plt.ylabel('Length of list_hor_lines[i]')
+plt.plot(lengths_hor, marker='o', color='r', label='Horizontal Lines')
+plt.plot(lengths_ver, marker='o', color='b', label='Vertical Lines')
+# Title and axis labels
+plt.title('Length of Arrays in Grouped Vertical and Horizontal Dots', fontsize=fs)
+plt.xlabel('Index i', fontsize=fs)
+plt.ylabel('Length of Arrays', fontsize=fs)
+# Add a grid
 plt.grid(True)
-plt.show()
-
-
-
-lengths = [len(list_ver_lines[i]) for i in range(len(list_ver_lines))]
-
-# Plot the lengths
-plt.plot(lengths, marker='o',color='b')
-plt.title('Length of Arrays in list_hor_lines')
-plt.xlabel('Index i')
-plt.ylabel('Length of list_hor_lines[i]')
-plt.grid(True)
+# Add legend
+plt.legend()
+# Show the plot
 plt.show()
 
 #%%
@@ -272,6 +226,31 @@ if perspective is True:
     except AttributeError:
         raise ValueError("Perspective correction only available "
                          "from Discorpy 1.4!!!")
+        
+# Plotting the residuals for horizontal lines
+plt.figure(figsize=(10, 6))
+plt.plot(list_hor_data[:, 0], list_hor_data[:, 1], 'r.', label='Horizontal Residuals', markersize=4)
+plt.title('Residuals of Horizontal Lines', fontsize=14)
+plt.xlabel('Radius (pixels)', fontsize=12)
+plt.ylabel('Residual (pixels)', fontsize=12)
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# Plotting the residuals for vertical lines
+plt.figure(figsize=(10, 6))
+plt.plot(list_ver_data[:, 0], list_ver_data[:, 1], 'b.', label='Vertical Residuals', markersize=4)
+plt.title('Residuals of Vertical Lines', fontsize=14)
+plt.xlabel('Radius (pixels)', fontsize=12)
+plt.ylabel('Residual (pixels)', fontsize=12)
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+
+
 #%%
 
 # Calculate the center of distortion. xcenter is the center from the left
@@ -291,16 +270,16 @@ plt.imshow(image_data, cmap='gray')
 plt.scatter(xcenter, ycenter, color='red', marker='x', s=100, label="Coarse Center of Distortion")
 
 # Labels and title
-plt.xlabel("X-axis")
-plt.ylabel("Y-axis")
-plt.title("Image with Center Marked")
+plt.xlabel("X-axis",fontsize=fs)
+plt.ylabel("Y-axis",fontsize=fs)
+plt.title("Original Image with Center Marked",fontsize=fs)
 plt.legend()
 
 # Show plot
 plt.show()
 
 #%%
-del centroid_matrix, centroids, centroids_x, centroids_y, axs, corrected_data_2, list_ver_data, list_hor_data, new_centroid_matrix, mat1 # save for memory
+del centroids, centroids_x, centroids_y, axs, corrected_data_2, list_ver_data, list_hor_data, new_centroid_matrix, mat1 # save for memory
 
 num_coef = 5  # Number of polynomial coefficients
 # Calculate distortion coefficients of a backward-from-forward model.
@@ -345,10 +324,228 @@ if check1 or check2:
     print("!!! Correction results are not at sub-pixel accuracy !!!")
 time_stop = timeit.default_timer()
 print("Done!!!\nRunning time is {} second!".format(time_stop - time_start))
+
 #%%
 
-# Plot the image
-
+# Plot the corrected image
 plt.figure(figsize=(8, 6))
-plt.imshow(corrected_mat-mat0)
+plt.imshow(corrected_mat, cmap='gray')
+plt.title('Corrected Image', fontsize=14)
+plt.xlabel('X-axis (pixels)', fontsize=12)
+plt.ylabel('Y-axis (pixels)', fontsize=12)
+plt.colorbar(label='Intensity')  # Optional: Add colorbar for intensity scale
+plt.tight_layout()
 plt.show()
+
+# Plot the difference between the corrected and original image
+plt.figure(figsize=(8, 6))
+plt.imshow(np.abs(corrected_mat - mat0), cmap='hot')  # Hot colormap for better visibility
+plt.title('Difference Between Corrected and Original Image', fontsize=14)
+plt.xlabel('X-axis (pixels)', fontsize=12)
+plt.ylabel('Y-axis (pixels)', fontsize=12)
+plt.colorbar(label='Intensity Difference')  # Optional: Add colorbar for difference scale
+plt.tight_layout()
+plt.show()
+
+# Plotting the residuals for horizontal lines
+plt.figure(figsize=(10, 6))
+plt.plot(list_hor_data[:, 0], list_hor_data[:, 1], 'r.', label='Horizontal Residuals', markersize=4)
+plt.title('Residuals of Horizontal Lines after correction', fontsize=14)
+plt.xlabel('Radius (pixels)', fontsize=12)
+plt.ylabel('Residual (pixels)', fontsize=12)
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# Plotting the residuals for vertical lines
+plt.figure(figsize=(10, 6))
+plt.plot(list_ver_data[:, 0], list_ver_data[:, 1], 'b.', label='Vertical Residuals', markersize=4)
+plt.title('Residuals of Vertical Lines after correction', fontsize=14)
+plt.xlabel('Radius (pixels)', fontsize=12)
+plt.ylabel('Residual (pixels)', fontsize=12)
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+
+
+#%%
+# To do. 
+# Plot three horizontal lines, one from the center and two nead the edge 
+# Plot three horizontal lines from the corrected image, one from the center and two nead the edge 
+# Repeat for vertical lines. How does the correction look. Are the lines straight? What is the residual? 
+
+
+# Plot for the horizontal lines (nearest to ycenter, top, and bottom)
+fig1 = plt.figure(figsize=(10, 6))
+
+# Find the horizontal line closest to ycenter
+nearest_line = min(list_hor_lines, key=lambda line: abs(np.mean(line[:, 0]) - ycenter))
+
+# Normalize the y-values of the nearest horizontal line
+nearest_line_normalized = nearest_line.copy()
+nearest_line_normalized[:, 0] -= nearest_line[0, 0]  # Subtract the first y value to normalize
+
+# Plot the nearest line (near ycenter) in blue
+plt.plot(nearest_line_normalized[:, 1], nearest_line_normalized[:, 0], '-o', markersize=4, color='blue', label='Nearest to ycenter')
+
+# Normalize the y-values of the top horizontal line
+top_line = list_hor_lines[-30]
+top_line_normalized = top_line.copy()
+top_line_normalized[:, 0] -= top_line[0, 0]  # Subtract the first y value to normalize
+plt.plot(top_line_normalized[:, 1], top_line_normalized[:, 0], '-o', markersize=4, color='red', label='Line near the Top')
+
+# Normalize the y-values of the bottom horizontal line
+bottom_line = list_hor_lines[30]
+bottom_line_normalized = bottom_line.copy()
+bottom_line_normalized[:, 0] -= bottom_line[0, 0]  # Subtract the first y value to normalize
+plt.plot(bottom_line_normalized[:, 1], bottom_line_normalized[:, 0], '-o', markersize=4, color='green', label='Line near the Bottom')
+
+# Adjust the axis to match the image orientation
+plt.gca().invert_yaxis()  # Invert the y-axis to match the image coordinates (top to bottom)
+plt.gca().set_aspect('auto', adjustable='box')  # Adjust aspect ratio if needed
+
+# Adding title and labels
+plt.title("Grouped Horizontal Dots (Nearest to ycenter, Top and Bottom) Normalized to the ycenter", fontsize=14)
+plt.xlabel("X-axis (pixels)", fontsize=12)
+plt.ylabel("Y-axis (pixels)", fontsize=12)
+
+# Rotate the y-axis ticks by 90 degrees
+plt.tick_params(axis='y', rotation=90)
+
+# Add a legend
+plt.legend(fontsize=fs)
+
+# Show the horizontal lines plot
+plt.show()
+
+# Plot for the vertical lines (nearest to xcenter, left, and right)
+fig2 = plt.figure(figsize=(10, 6))
+
+# Find the vertical line closest to xcenter
+nearest_ver_line = min(list_ver_lines, key=lambda line: abs(np.mean(line[:, 1]) - xcenter))
+
+# Normalize the x-values of the nearest vertical line
+nearest_ver_line_normalized = nearest_ver_line.copy()
+nearest_ver_line_normalized[:, 1] -= nearest_ver_line[0, 1]  # Subtract the first x value to normalize
+
+# Plot the nearest vertical line (near xcenter) in cyan
+plt.plot(nearest_ver_line_normalized[:, 1], nearest_ver_line_normalized[:, 0], '-o', markersize=4, color='blue', label='Nearest to xcenter')
+
+# Normalize the x-values of the left vertical line
+top_ver_line = list_ver_lines[-30]
+top_ver_line_normalized = top_ver_line.copy()
+top_ver_line_normalized[:, 1] -= top_ver_line[0, 1]  # Subtract the first x value to normalize
+plt.plot(top_ver_line_normalized[:, 1], top_ver_line_normalized[:, 0], '-o', markersize=4, color='red', label='Line near the Left')
+
+# Normalize the x-values of the right vertical line
+bottom_ver_line = list_ver_lines[30]
+bottom_ver_line_normalized = bottom_ver_line.copy()
+bottom_ver_line_normalized[:, 1] -= bottom_ver_line[0, 1]  # Subtract the first x value to normalize
+plt.plot(bottom_ver_line_normalized[:, 1], bottom_ver_line_normalized[:, 0], '-o', markersize=4, color='green', label='Line near the Right')
+
+# Invert the y-axis to match the image coordinates (top to bottom)
+plt.gca().invert_yaxis()
+
+# Rotate the y-axis ticks by 90 degrees
+plt.tick_params(axis='y', rotation=90)
+
+# Adding title and labels
+plt.title("Grouped Vertical Dots (Nearest to xcenter, Left and Right) Normalized to the xcenter", fontsize=14)
+plt.xlabel("X-axis (pixels)", fontsize=12)
+plt.ylabel("Y-axis (pixels)", fontsize=12)
+
+# Add a legend
+plt.legend(fontsize=fs)
+
+# Show the vertical lines plot
+plt.show()
+
+#%%
+# Plot for the corrected horizontal lines (nearest to ycenter, top, and bottom)
+fig1 = plt.figure(figsize=(10, 6))
+
+# Find the corrected horizontal line closest to ycenter
+nearest_line = min(list_uhor_lines, key=lambda line: abs(np.mean(line[:, 0]) - ycenter))
+
+# Normalize the y-values of the nearest corrected horizontal line
+nearest_line_normalized = nearest_line.copy()
+nearest_line_normalized[:, 0] -= nearest_line[0, 0]  # Subtract the first y value to normalize
+
+# Plot the nearest corrected line (near ycenter) in blue
+plt.plot(nearest_line_normalized[:, 1], nearest_line_normalized[:, 0], '-o', markersize=4, color='blue', label='Nearest to ycenter')
+
+# Normalize the y-values of the top corrected line
+top_line = list_uhor_lines[-30]
+top_line_normalized = top_line.copy()
+top_line_normalized[:, 0] -= top_line[0, 0]  # Subtract the first y value to normalize
+plt.plot(top_line_normalized[:, 1], top_line_normalized[:, 0], '-o', markersize=4, color='red', label='Line near the Top')
+
+# Normalize the y-values of the bottom corrected line
+bottom_line = list_uhor_lines[30]
+bottom_line_normalized = bottom_line.copy()
+bottom_line_normalized[:, 0] -= bottom_line[0, 0]  # Subtract the first y value to normalize
+plt.plot(bottom_line_normalized[:, 1], bottom_line_normalized[:, 0], '-o', markersize=4, color='green', label='Line near the Bottom')
+
+# Adjust the axis to match the image orientation
+plt.gca().invert_yaxis()  # Invert the y-axis to match the image coordinates (top to bottom)
+plt.gca().set_aspect('auto', adjustable='box')  # Adjust aspect ratio if needed
+
+# Adding title and labels
+plt.title("Corrected Horizontal Dots (Nearest to ycenter, Top and Bottom) Normalized to the ycenter", fontsize=14)
+plt.xlabel("X-axis (pixels)", fontsize=12)
+plt.ylabel("Y-axis (pixels)", fontsize=12)
+
+# Rotate the y-axis ticks by 90 degrees
+plt.tick_params(axis='y', rotation=90)
+
+# Add a legend
+plt.legend(fontsize=fs)
+
+# Show the corrected horizontal lines plot
+plt.show()
+
+# Plot for the corrected vertical lines (nearest to xcenter, left, and right)
+fig2 = plt.figure(figsize=(10, 6))
+
+# Find the corrected vertical line closest to xcenter
+nearest_ver_line = min(list_uver_lines, key=lambda line: abs(np.mean(line[:, 1]) - xcenter))
+
+# Normalize the x-values of the nearest corrected vertical line
+nearest_ver_line_normalized = nearest_ver_line.copy()
+nearest_ver_line_normalized[:, 1] -= nearest_ver_line[0, 1]  # Subtract the first x value to normalize
+
+# Plot the nearest corrected vertical line (near xcenter) in cyan
+plt.plot(nearest_ver_line_normalized[:, 1], nearest_ver_line_normalized[:, 0], '-o', markersize=4, color='blue', label='Nearest to xcenter')
+
+# Normalize the x-values of the left corrected vertical line
+top_ver_line = list_uver_lines[-30]
+top_ver_line_normalized = top_ver_line.copy()
+top_ver_line_normalized[:, 1] -= top_ver_line[0, 1]  # Subtract the first x value to normalize
+plt.plot(top_ver_line_normalized[:, 1], top_ver_line_normalized[:, 0], '-o', markersize=4, color='red', label='Line near the Left')
+
+# Normalize the x-values of the right corrected vertical line
+bottom_ver_line = list_uver_lines[30]
+bottom_ver_line_normalized = bottom_ver_line.copy()
+bottom_ver_line_normalized[:, 1] -= bottom_ver_line[0, 1]  # Subtract the first x value to normalize
+plt.plot(bottom_ver_line_normalized[:, 1], bottom_ver_line_normalized[:, 0], '-o', markersize=4, color='green', label='Line near the Right')
+
+# Invert the y-axis to match the image coordinates (top to bottom)
+plt.gca().invert_yaxis()
+
+# Rotate the y-axis ticks by 90 degrees
+plt.tick_params(axis='y', rotation=90)
+
+# Adding title and labels
+plt.title("Corrected Vertical Dots (Nearest to xcenter, Left and Right) Normalized to the xcenter", fontsize=14)
+plt.xlabel("X-axis (pixels)", fontsize=12)
+plt.ylabel("Y-axis (pixels)", fontsize=12)
+
+# Add a legend
+plt.legend(fontsize=fs)
+
+# Show the corrected vertical lines plot
+plt.show()
+
