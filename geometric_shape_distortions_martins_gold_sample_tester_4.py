@@ -113,7 +113,7 @@ axs[1, 1].imshow(zoomed_in_area, cmap='gray')  # Display zoomed-in image
 # Overlay centroids in red (zoomed-in area)
 centroids_y_zoomed, centroids_x_zoomed = zip(*[(y - 3000, x - 3000) for y, x in centroids if 3000 <= y <= 3400 and 3000 <= x <= 3400])
 axs[1, 1].scatter(centroids_x_zoomed, centroids_y_zoomed, color='red', s=50, edgecolors='black', alpha=0.75)
-axs[1, 1].set_title("Zoomed-In Area [3000:3400, 3000:3400] with Centroids", fontsize=fs)
+axs[1, 1].set_title("Zoomed-In Area with Centroids", fontsize=fs)
 axs[1, 1].set_xlabel("X-axis (pixels)", fontsize=fs)
 axs[1, 1].set_ylabel("Y-axis (pixels)", fontsize=fs)
 
@@ -124,7 +124,8 @@ plt.tight_layout()
 plt.show()
 
 #%%
-mat1 = np.where(new_centroid_matrix == 0, np.nan, new_centroid_matrix)
+
+mat1 = np.nan_to_num(new_centroid_matrix, nan=0, posinf=0, neginf=0)
 (height, width) = mat1.shape
 # Calculate the median dot-size and the median distance of two nearest dots.
 (dot_size, dot_dist) = calc_size_distance(mat1, ratio=0.3)
@@ -134,28 +135,26 @@ print("Median size of dots: {0}\nMedian distance between two dots: {1}".format(
 #%%
 # Reference: https://github.com/DiamondLightSource/discorpy/blob/master/examples/example_03.py
 # Calculate the horizontal slope and the vertical slope of the grid.
-hor_slope = prep.calc_hor_slope(mat1, ratio=0.3)
-ver_slope = prep.calc_ver_slope(mat1, ratio=0.3)
+hor_slope = prep.calc_hor_slope(mat1, ratio=0.3) # ratio=0.3
+ver_slope = prep.calc_ver_slope(mat1, ratio=0.3) # ratio=0.3
 print("Horizontal slope: {0}\nVertical slope: {1}".format(hor_slope, ver_slope))
 
 #%%
-print("This may take a while (Nis computer 10 minuttes)")
+print("This may take a while (Nis computer 8 minuttes)")
 # Group dots into horizontal lines and vertical lines.
-list_hor_lines = group_dots_hor_lines(mat1, hor_slope, dot_dist, ratio=0.4,
+list_hor_lines = group_dots_hor_lines(mat1, hor_slope, dot_dist, ratio=0.1,
                                            num_dot_miss=15, accepted_ratio=0.6) # ratio=0.3, num_dot_miss=10, accepted_ratio=0.6
-list_ver_lines = group_dots_ver_lines(mat1, ver_slope, dot_dist, ratio=0.4,
+list_ver_lines = group_dots_ver_lines(mat1, ver_slope, dot_dist, ratio=0.1,
                                            num_dot_miss=15, accepted_ratio=0.6)
 
 # Remove residual dots.
-list_hor_lines = remove_residual_dots_hor(list_hor_lines, hor_slope,
-                                               residual=2.5)
-list_ver_lines = remove_residual_dots_ver(list_ver_lines, ver_slope,
-                                               residual=2.5)
+list_hor_lines = remove_residual_dots_hor(list_hor_lines, hor_slope, residual=2.5)
+list_ver_lines = remove_residual_dots_ver(list_ver_lines, ver_slope, residual=2.5)
 
 
 
-#%% Plot the grouping in each
 
+# Plot the grouping in each
 # Define a list of colors to rotate through
 colors_hor = itertools.cycle(['red', 'blue', 'green', 'purple', 'orange', 'cyan', 'magenta', 'yellow'])
 
@@ -181,9 +180,6 @@ plt.title("Original Image with Grouped Vertical Dots", fontsize=fs)
 plt.xlabel("X-axis (pixels)", fontsize=fs)
 plt.ylabel("Y-axis (pixels)", fontsize=fs)
 plt.show()  # Show the second figure
-
-
-
 
 lengths_hor = [len(list_hor_lines[i]) for i in range(len(list_hor_lines))]
 lengths_ver = [len(list_ver_lines[i]) for i in range(len(list_ver_lines))]
@@ -256,9 +252,12 @@ plt.show()
 # Calculate the center of distortion. xcenter is the center from the left
 # of the image. ycenter is the center from the top of the image.
 (xcenter, ycenter) = find_cod_coarse(list_hor_lines, list_ver_lines)
+print("\nCenter of distortion (Coarse):\nx-center (from the left of the image): "
+      "{0}\ny-center (from the top of the image): {1}\n".format(
+        xcenter, ycenter))
 # Use fine-search if there's no perspective distortion.
-# (xcenter, ycenter) = find_cod_fine(list_hor_lines, list_ver_lines, xcenter, ycenter, dot_dist)
-print("\nCenter of distortion:\nx-center (from the left of the image): "
+(xcenter, ycenter) = find_cod_fine(list_hor_lines, list_ver_lines, xcenter, ycenter, dot_dist)
+print("\nCenter of distortion (Fine):\nx-center (from the left of the image): "
       "{0}\ny-center (from the top of the image): {1}\n".format(
         xcenter, ycenter))
 
@@ -279,28 +278,27 @@ plt.legend()
 plt.show()
 
 #%%
-del centroids, centroids_x, centroids_y, axs, corrected_data_2, list_ver_data, list_hor_data, new_centroid_matrix, mat1 # save for memory
-
+#del centroids, centroids_x, centroids_y, axs, corrected_data_2, list_ver_data, list_hor_data, new_centroid_matrix, mat1 # save for memory
+#del centroid_matrix
+#del centroids_x_zoomed, centroids_y_zoomed, lengths_ver, image_data
 num_coef = 5  # Number of polynomial coefficients
 # Calculate distortion coefficients of a backward-from-forward model.
 print("Calculate distortion coefficients...")
 list_ffact, list_bfact = calc_coef_backward_from_forward(list_hor_lines,
                                                               list_ver_lines,
                                                               xcenter, ycenter,
-                                                              num_coef,threshold=3.8)# 1.9 or 3.9
+                                                              num_coef,threshold=5.8)# 1.9 or 3.9
 
-#list_fact = calc_coef_backward(list_hor_lines,list_ver_lines, xcenter, ycenter, num_coef, threshold=3.9)
-#%%
+#list_fact = calc_coef_backward(list_hor_lines,list_ver_lines, xcenter, ycenter, num_coef, threshold=3.8)
+
 # Apply distortion correction
 corrected_mat = unwarp_image_backward(mat0, xcenter, ycenter, list_bfact)
-#corrected_mat_bw = unwarp_image_backward(mat0, xcenter, ycenter, list_fact)
+#corrected_mat = unwarp_image_backward(mat0, xcenter, ycenter, list_fact)
 
-#%%
-losa.save_image(output_base + "/corrected_image.tif", corrected_mat)
-losa.save_image(output_base + "/diff_corrected_image.tif",
-              np.abs(corrected_mat - mat0))
-losa.save_metadata_txt(output_base + "/distortion_coefficients_bw.txt", xcenter,
-                     ycenter, list_bfact)
+
+#losa.save_image(output_base + "/corrected_image.tif", corrected_mat)
+#losa.save_image(output_base + "/diff_corrected_image.tif", np.abs(corrected_mat - mat0))
+#losa.save_metadata_txt(output_base + "/distortion_coefficients_bw.txt", xcenter, ycenter, list_bfact)
 
 # Check the correction results.
 list_uhor_lines = unwarp_line_forward(list_hor_lines, xcenter, ycenter,
@@ -325,7 +323,7 @@ if check1 or check2:
 time_stop = timeit.default_timer()
 print("Done!!!\nRunning time is {} second!".format(time_stop - time_start))
 
-#%%
+
 
 # Plot the corrected image
 plt.figure(figsize=(8, 6))
@@ -370,12 +368,6 @@ plt.tight_layout()
 plt.show()
 
 
-
-#%%
-# To do. 
-# Plot three horizontal lines, one from the center and two nead the edge 
-# Plot three horizontal lines from the corrected image, one from the center and two nead the edge 
-# Repeat for vertical lines. How does the correction look. Are the lines straight? What is the residual? 
 
 
 # Plot for the horizontal lines (nearest to ycenter, top, and bottom)
@@ -463,7 +455,7 @@ plt.legend(fontsize=fs)
 # Show the vertical lines plot
 plt.show()
 
-#%%
+
 # Plot for the corrected horizontal lines (nearest to ycenter, top, and bottom)
 fig1 = plt.figure(figsize=(10, 6))
 
