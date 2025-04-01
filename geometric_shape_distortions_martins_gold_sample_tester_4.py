@@ -255,12 +255,21 @@ plt.show()
 print("\nCenter of distortion (Coarse):\nx-center (from the left of the image): "
       "{0}\ny-center (from the top of the image): {1}\n".format(
         xcenter, ycenter))
+
+# Use bailey-search to find CoD.
+(xcenter, ycenter) = find_cod_bailey(list_hor_lines, list_ver_lines, iteration=100)
+print("\nCenter of distortion (Bailey):\nx-center (from the left of the image): "
+      "{0}\ny-center (from the top of the image): {1}\n".format(
+        xcenter, ycenter))
+
 # Use fine-search if there's no perspective distortion.
 (xcenter, ycenter) = find_cod_fine(list_hor_lines, list_ver_lines, xcenter, ycenter, dot_dist)
 print("\nCenter of distortion (Fine):\nx-center (from the left of the image): "
       "{0}\ny-center (from the top of the image): {1}\n".format(
         xcenter, ycenter))
 
+
+'''
 # Plot the image
 plt.figure(figsize=(8, 6))
 plt.imshow(image_data, cmap='gray')
@@ -276,11 +285,9 @@ plt.legend()
 
 # Show plot
 plt.show()
+'''
 
-#%%
-#del centroids, centroids_x, centroids_y, axs, corrected_data_2, list_ver_data, list_hor_data, new_centroid_matrix, mat1 # save for memory
-#del centroid_matrix
-#del centroids_x_zoomed, centroids_y_zoomed, lengths_ver, image_data
+del centroids, centroids_x, centroids_y, axs, corrected_data_2, list_ver_data, list_hor_data, new_centroid_matrix, mat1, centroid_matrix, centroids_x_zoomed, centroids_y_zoomed, lengths_ver  # save for memory
 num_coef = 5  # Number of polynomial coefficients
 # Calculate distortion coefficients of a backward-from-forward model.
 print("Calculate distortion coefficients...")
@@ -291,20 +298,26 @@ list_ffact, list_bfact = calc_coef_backward_from_forward(list_hor_lines,
 
 #list_fact = calc_coef_backward(list_hor_lines,list_ver_lines, xcenter, ycenter, num_coef, threshold=3.8)
 
-# Apply distortion correction
-corrected_mat = unwarp_image_backward(mat0, xcenter, ycenter, list_bfact)
+# Apply field distortion correction
+indices = compute_indices(xcenter, ycenter, list_bfact, mat0) # New function. Get distortion indicies
+print("Current time 0:", datetime.now().strftime("%M:%S"))
+corrected_mat = unwarp_image_backward_tester(mat0, indices) # New function. Apply distortion field. This should be called on each projection
+#corrected_mat = unwarp_image_backward(mat0, xcenter, ycenter, list_bfact) # Discorpy function
+print("Current time 1:", datetime.now().strftime("%M:%S"))
 #corrected_mat = unwarp_image_backward(mat0, xcenter, ycenter, list_fact)
 
 
 #losa.save_image(output_base + "/corrected_image.tif", corrected_mat)
 #losa.save_image(output_base + "/diff_corrected_image.tif", np.abs(corrected_mat - mat0))
-#losa.save_metadata_txt(output_base + "/distortion_coefficients_bw.txt", xcenter, ycenter, list_bfact)
+losa.save_metadata_txt(output_base + "/distortion_coefficients_bw.txt", xcenter, ycenter, list_bfact)
 
-# Check the correction results.
-list_uhor_lines = unwarp_line_forward(list_hor_lines, xcenter, ycenter,
-                                            list_ffact)
-list_uver_lines = unwarp_line_forward(list_ver_lines, xcenter, ycenter,
-                                            list_ffact)
+# Check the correction results. #unwarp_line_backward or unwarp_line_forward
+list_uhor_lines = unwarp_line_backward(list_hor_lines, xcenter, ycenter,
+                                            list_bfact)
+list_uver_lines = unwarp_line_backward(list_ver_lines, xcenter, ycenter,
+                                            list_bfact)
+
+
 losa.save_plot_image(output_base + "/horizontal_dots_unwarped.png",
                    list_uhor_lines, height, width)
 losa.save_plot_image(output_base + "/vertical_dots_unwarped.png",
@@ -315,8 +328,8 @@ losa.save_residual_plot(output_base + "/residual_hor_after_correction.png",
                       list_hor_data, height, width)
 losa.save_residual_plot(output_base + "/residual_ver_after_correction.png",
                       list_ver_data, height, width)
-check1 = check_distortion(list_hor_data)
-check2 = check_distortion(list_ver_data)
+check1 = check_distortion(list_hor_data) # This line checks if the percentage of residuals greater than 1.0 exceeds 15%
+check2 = check_distortion(list_ver_data) # This line checks if the percentage of residuals greater than 1.0 exceeds 15%
 
 if check1 or check2:
     print("!!! Correction results are not at sub-pixel accuracy !!!")
@@ -540,4 +553,9 @@ plt.legend(fontsize=fs)
 
 # Show the corrected vertical lines plot
 plt.show()
+
+
+# You have the correction coefficients. 
+# You need the field to be calculated independantly which can be applied to the individual images. 
+
 

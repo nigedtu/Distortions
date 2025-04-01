@@ -21,7 +21,9 @@ import time
 import timeit
 import winsound
 
-
+from scipy.ndimage import _nd_image
+from scipy.ndimage import spline_filter
+from scipy.ndimage import _ni_support
 
 from skimage.measure import regionprops
 import scipy.ndimage as ndi
@@ -86,5 +88,140 @@ def harris_corners_to_centroid_matrix2(image, square_size=26, corner_threshold_f
     return output_matrix  # Returns binary matrix with detected corners
 
 
+def optimized_map_coordinates(input, coordinates, output=None, order=3,
+                              mode='constant', cval=0.0, prefilter=True):
+    """
+    Optimized version of map_coordinates that skips unnecessary computations.
+
+    Parameters
+    ----------
+    %(input)s
+    coordinates : array_like
+        The coordinates at which `input` is evaluated.
+    %(output)s
+    order : int, optional
+        The order of the spline interpolation, default is 3.
+        The order has to be in the range 0-5.
+    %(mode_interp_constant)s
+    %(cval)s
+    %(prefilter)s
+
+    Returns
+    -------
+    map_coordinates : ndarray
+        The result of transforming the input. The shape of the output is
+        derived from that of `coordinates` by dropping the first axis.
+    """
+    # Early exit if order is out of range
+    if order < 0 or order > 5:
+        raise ValueError('Spline order not supported')
+
+    input = np.asarray(input)
+    coordinates = np.asarray(coordinates)
+
+    # Early exit if coordinates are complex (if your use case doesn't need this)
+    if np.iscomplexobj(coordinates):
+        raise TypeError('Complex type not supported')
+
+    # Check if input and coordinates have compatible shapes
+    output_shape = coordinates.shape[1:]
+    if input.ndim < 1 or len(output_shape) < 1:
+        raise ValueError('Input and output rank must be > 0')
+
+    if coordinates.shape[0] != input.ndim:
+        raise ValueError('Invalid shape for coordinate array')
+
+    complex_output = np.iscomplexobj(input)
+    output = _ni_support._get_output(output, input, shape=output_shape,
+                                     complex_output=complex_output)
+
+    # Handle complex input by splitting real and imaginary parts (if needed)
+    if complex_output:
+        kwargs = dict(order=order, mode=mode, prefilter=prefilter)
+        optimized_map_coordinates(input.real, coordinates, output=output.real,
+                                  cval=np.real(cval), **kwargs)
+        optimized_map_coordinates(input.imag, coordinates, output=output.imag,
+                                  cval=np.imag(cval), **kwargs)
+        return output
+
+    # Skipping prefiltering for order <= 1
+    if prefilter and order > 1:
+        padded, npad = _prepad_for_spline_filter(input, mode, cval)
+        filtered = spline_filter(padded, order, output=np.float64,
+                                 mode=mode)
+    else:
+        npad = 0
+        filtered = input
+
+    mode = _ni_support._extend_mode_to_code(mode)
+
+    # Optimized geometric transform operation
+    _nd_image.geometric_transform(filtered, None, coordinates, None, None,
+                                  output, order, mode, cval, npad, None, None)
+
+    return output
 
 
+def unwarp_image_backward_tester(mat, indices, order=1, mode="reflect"):
+    """
+    Unwarp an image using the previously computed indices and apply transformation.
+
+    Parameters
+    ----------
+    mat : array_like
+        2D array.
+    indices : tuple
+        A tuple containing the transformed y and x indices for the mapping.
+    order : int, optional
+        The order of the spline interpolation.
+    mode : {'reflect', 'grid-mirror', 'constant', 'grid-constant', 'nearest',
+           'mirror', 'grid-wrap', 'wrap'}, optional
+        To determine how to handle image boundaries.
+
+    Returns
+    -------
+    array_like
+        2D array. Distortion-corrected image.
+    """
+    # Apply the transformation using map_coordinates
+    mat_transformed = map_coordinates(mat, indices, order=order, mode=mode)
+    #mat_transformed = optimized_map_coordinates(mat, indices, order=order, mode=mode)
+
+    # Get the original shape of the input image (mat)
+    height, width = mat.shape
+    
+    # Ensure the result is reshaped to match the original image shape
+    return mat_transformed.reshape((height, width))  # Reshape to original dimensions
+
+def compute_indices(xcenter, ycenter, list_fact, mat):
+    """
+    Compute the transformation grid indices that can be reused across multiple calls.
+    
+    Parameters
+    ----------
+    xcenter : float
+        Center of distortion in x-direction.
+    ycenter : float
+        Center of distortion in y-direction.
+    list_fact : list of float
+        Polynomial coefficients of the backward model.
+    mat : array_like
+        2D array (image matrix).
+
+    Returns
+    -------
+    indices : tuple
+        A tuple containing the transformed y and x indices for the mapping.
+    """
+    (height, width) = mat.shape
+    xu_list = np.arange(width) - xcenter
+    yu_list = np.arange(height) - ycenter
+    xu_mat, yu_mat = np.meshgrid(xu_list, yu_list)
+    ru_mat = np.sqrt(xu_mat ** 2 + yu_mat ** 2)
+    fact_mat = np.sum(np.asarray(
+        [factor * ru_mat ** i for i, factor in enumerate(list_fact)]), axis=0)
+    xd_mat = np.float32(np.clip(xcenter + fact_mat * xu_mat, 0, width - 1))
+    yd_mat = np.float32(np.clip(ycenter + fact_mat * yu_mat, 0, height - 1))
+    indices = np.reshape(yd_mat, (-1, 1)), np.reshape(xd_mat, (-1, 1))
+
+    return indices
